@@ -1,0 +1,3 @@
+#!/bin/bash
+
+gcc ~/Documents/SkyLine2D/src/SkyLine2D.cpp -o ~/Documents/SkyLine2D/build/SkyLine2D -g -Werror -Wall -std=c++11
