@@ -53,9 +53,15 @@ bool WriteToSyRen(motor_packet *Packet, int FileDescriptor)
 	return (BytesWritten < 0) ? false : true;
 }
 
-int main()
-{
-	
+/* Open a new socket for the server to listen on for incomming connections 
+
+   Takes as an argument the port number you want the server to listen on 
+   (this must be the same number as the port you ask the phone to connect to)
+
+   Returns -1 if an error occured or the File Descriptor if the socket was successfully created 
+*/
+int OpenServerSocket(const char *Port)
+{	
 	int Status;
 	addrinfo Hints = {};
 	addrinfo *ServerInfo;
@@ -66,49 +72,73 @@ int main()
 	Hints.ai_socktype = SOCK_STREAM;
 	Hints.ai_flags = AI_PASSIVE;
 
-	Status = getaddrinfo(NULL, "7000", &Hints, &ServerInfo);
+	Status = getaddrinfo(NULL, Port, &Hints, &ServerInfo);
 
-	if (Status != 0)
+	if (Status == 0)
 	{
-		printf("error with getaddrinfo\n");
+		int SocketFileDescriptor = socket(ServerInfo->ai_family, ServerInfo->ai_socktype, ServerInfo->ai_protocol);
+		
+		if(SocketFileDescriptor >= 0)
+		{
+			int BindSuccessful = bind(SocketFileDescriptor, ServerInfo->ai_addr, ServerInfo->ai_addrlen);
+
+			if(BindSuccessful >= 0)
+			{
+				int ListenSuccessful = listen(SocketFileDescriptor, 5);
+
+				if(ListenSuccessful >= 0)
+				{
+					sockaddr_storage ClientAddress;
+					socklen_t ClientAddressSize = sizeof(ClientAddress);
+
+					int NewSocketFileDescriptor = accept(SocketFileDescriptor, (sockaddr *)&ClientAddress, &ClientAddressSize);
+
+					if(NewSocketFileDescriptor >= 0)
+					{
+						printf("Success on accept!\n");
+						freeaddrinfo(ServerInfo);
+						return NewSocketFileDescriptor;
+					}
+					else
+					{
+						printf("Error on accept\n");
+						freeaddrinfo(ServerInfo);
+						return -1;
+					}
+				}
+				else
+				{
+					printf("Cannot Listen\n");
+					freeaddrinfo(ServerInfo);
+					return -1;
+				}
+			}
+			else
+			{
+				printf("Bind failed\n");
+				freeaddrinfo(ServerInfo);
+				return -1;
+			}
+		}
+		else
+		{
+			printf("Error opening socket\n");
+			freeaddrinfo(ServerInfo);
+			return -1;
+		}
 	} 
-
-	//create a socket
-	int SocketFileDescriptor = socket(ServerInfo->ai_family, ServerInfo->ai_socktype, ServerInfo->ai_protocol);
-	
-	if(SocketFileDescriptor < 0)
-	{
-		printf("Error opening socket\n");
-	}
-
-	int BindSuccessful = bind(SocketFileDescriptor, ServerInfo->ai_addr, ServerInfo->ai_addrlen);
-
-	if(BindSuccessful < 0)
-	{
-		printf("Bind failed\n");
-	}
-
-	int ListenSuccessful = listen(SocketFileDescriptor, 5);
-
-	if(ListenSuccessful < 0)
-	{
-		printf("Cannot Listen\n");
-	}
-
-	sockaddr_storage ClientAddress;
-	socklen_t ClientAddressSize = sizeof(ClientAddress);
-
-	int NewSocketFileDescriptor = accept(SocketFileDescriptor, (sockaddr *)&ClientAddress, &ClientAddressSize);
-
-	if(NewSocketFileDescriptor < 0)
-	{
-		printf("Error on accept\n");
-	}
 	else
 	{
-		printf("Success on accept!\n");
+		printf("error with getaddrinfo\n");
+		freeaddrinfo(ServerInfo);
+		return -1;
 	}
+}
 
+int main()
+{
+	
+	int ServerSocketFileDescriptor = OpenServerSocket("7000");
 
 	motor_packet Packet = {};
 
@@ -118,40 +148,43 @@ int main()
 	{
 		bool Done = false;
 
-		//						Main run loop
+		// Main run loop
 		while(!Done)
 		{
 			int8 *RecievedCommand =(int8 *) malloc(sizeof(int8));
 
-			int RecieveStatus = recv(NewSocketFileDescriptor, RecievedCommand, sizeof(int8), 0);
+			int RecieveStatus = recv(ServerSocketFileDescriptor, RecievedCommand, sizeof(int8), 0);
 
-			if(RecieveStatus < 0)
+			if(RecieveStatus >= 0)
 			{
-				printf("error recieving data\n");
-			}
-			else
-			{
-				if(RecieveStatus == 0)
-				{
-					printf("client disconnected\n");
-				}
-				else
+				if(RecieveStatus != 0)
 				{
 					switch(*RecievedCommand)
 					{
+						//Stop motor
 						case 0:
 						DriveForeward(&Packet, 128, 0);
 						break;
-					
+						
+						//Drive Forward
 						case 1:
 						DriveForeward(&Packet, 128, 64);
 						break;
 
+						//Drive Backward
 						case 2:
 						DriveBackward(&Packet, 128, 64);
 						break;
 					}	
 				}
+				else
+				{
+					printf("client disconnected\n");
+				}
+			}
+			else
+			{
+				printf("error recieving data\n");
 			}				
 
 			if(!WriteToSyRen(&Packet, FileDescriptor))
